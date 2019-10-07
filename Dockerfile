@@ -34,6 +34,7 @@ RUN echo "#!/bin/sh\nexit 0" > /usr/sbin/policy-rc.d && \
         nodejs \
         postgresql \
         postgresql-client \
+        mysql-client \
         pwgen \
         rabbitmq-server \
         redis-server \
