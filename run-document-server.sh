@@ -143,6 +143,10 @@ update_postgresql_settings(){
   ${JSON} -I -e "this.services.CoAuthoring.sql.dbName = '${POSTGRESQL_SERVER_DB_NAME}'"
   ${JSON} -I -e "this.services.CoAuthoring.sql.dbUser = '${POSTGRESQL_SERVER_USER}'"
   ${JSON} -I -e "this.services.CoAuthoring.sql.dbPass = '${POSTGRESQL_SERVER_PASS}'"
+  if [ ${DATABASE_TYPE} == "mysql" ]; then
+    ${JSON} -I -e "this.services.CoAuthoring.sql.type = 'mysql'"
+    ${JSON} -I -e "this.services.CoAuthoring.sql.charset = 'utf8mb4'"
+  fi
 }
 
 update_rabbitmq_setting(){
@@ -249,6 +253,19 @@ create_postgresql_tbl(){
   $PSQL -d "${POSTGRESQL_SERVER_DB_NAME}" -f "${APP_DIR}/server/schema/postgresql/createdb.sql"
 }
 
+create_mysql_tbl(){
+  CONNECTION_PARAMS="-h${POSTGRESQL_SERVER_HOST} -P${POSTGRESQL_SERVER_PORT} -u${POSTGRESQL_SERVER_USER}"
+  if [ -n "${POSTGRESQL_SERVER_PASS}" ]; then
+    export MYSQL_PWD=${POSTGRESQL_SERVER_PASS}
+  fi
+
+  # create database if not exists
+  mysql -h${POSTGRESQL_SERVER_HOST} -P${POSTGRESQL_SERVER_PORT} -u${POSTGRESQL_SERVER_USER} -e "create database if not exists ${POSTGRESQL_SERVER_DB_NAME}"
+
+  # apply database schema
+  mysql -h${POSTGRESQL_SERVER_HOST} -P${POSTGRESQL_SERVER_PORT} -u${POSTGRESQL_SERVER_USER} ${POSTGRESQL_SERVER_DB_NAME} < "${APP_DIR}/server/schema/mysql/createdb.sql"
+}
+
 update_nginx_settings(){
   # Set up nginx
   sed 's/^worker_processes.*/'"worker_processes ${NGINX_WORKER_PROCESSES};"'/' -i ${NGINX_CONFIG_PATH}
@@ -340,21 +357,28 @@ if [ ${ONLYOFFICE_DATA_CONTAINER_HOST} = "localhost" ]; then
   update_jwt_settings
 
   # update settings by env variables
-  if [ ${POSTGRESQL_SERVER_HOST} != "localhost" ]; then
+  if [ ${DATABASE_TYPE} == "mysql" ]; then
     update_postgresql_settings
-    waiting_for_postgresql
-    create_postgresql_tbl
-  else
-    # change rights for postgres directory
-    chown -R postgres:postgres ${PG_ROOT}
-    chmod -R 700 ${PG_ROOT}
+    create_mysql_tbl
 
-    # create new db if it isn't exist
-    if [ ! -d ${PGDATA} ]; then
-      create_postgresql_cluster
-      PG_NEW_CLUSTER=true
+  else
+
+    if [ ${POSTGRESQL_SERVER_HOST} != "localhost" ]; then
+      update_postgresql_settings
+      waiting_for_postgresql
+      create_postgresql_tbl
+    else
+      # change rights for postgres directory
+      chown -R postgres:postgres ${PG_ROOT}
+      chmod -R 700 ${PG_ROOT}
+
+      # create new db if it isn't exist
+      if [ ! -d ${PGDATA} ]; then
+        create_postgresql_cluster
+        PG_NEW_CLUSTER=true
+      fi
+      LOCAL_SERVICES+=("postgresql")
     fi
-    LOCAL_SERVICES+=("postgresql")
   fi
 
   if [ ${AMQP_SERVER_HOST} != "localhost" ]; then
